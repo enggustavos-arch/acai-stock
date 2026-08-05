@@ -1,25 +1,13 @@
 import Link from 'next/link';
 import AdminHeader from '@/components/AdminHeader';
-import { createClient } from '@/lib/supabase/server';
 
-export const dynamic = 'force-dynamic';
-
-const ALL_ITEMS = [
-  { href: '/admin/restocks', title: 'Reposições', desc: 'Registo de mercadoria recebida por loja', adminOnly: false },
-  { href: '/admin/export', title: 'Exportar CSV', desc: 'Stock e consumo por loja e período', adminOnly: false },
-  { href: '/admin/settings', title: 'Definições', desc: 'Lojas, hora limite da contagem', adminOnly: true },
+const items = [
+  { href: '/admin/restocks', title: 'Reposições', desc: 'Registo de mercadoria recebida por loja' },
+  { href: '/admin/export', title: 'Exportar CSV', desc: 'Stock e consumo por loja e período' },
+  { href: '/admin/settings', title: 'Definições', desc: 'Lojas, hora limite da contagem' },
 ];
 
-export default async function MorePage() {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const { data: profile } = user
-    ? await supabase.from('profiles').select('role').eq('user_id', user.id).single()
-    : { data: null };
-  const isAdmin = profile?.role === 'admin';
-  const items = ALL_ITEMS.filter((it) => !it.adminOnly || isAdmin);
+export default function MorePage() {
   return (
     <main>
       <AdminHeader title="Mais" />

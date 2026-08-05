@@ -30,7 +30,7 @@ export default function LoginPage() {
           <div className="mx-auto mb-3 h-16 w-16 rounded-2xl bg-acai-600 flex items-center justify-center text-3xl">
             🍇
           </div>
-          <h1 className="text-2xl font-bold text-acai-900">Acai Algarve</h1>
+          <h1 className="text-2xl font-bold text-acai-900">Contagem Açaí</h1>
           <p className="text-sm text-gray-500 mt-1">Contagem diária de stock</p>
         </div>
         <form onSubmit={onSubmit} className="card p-5 space-y-4">

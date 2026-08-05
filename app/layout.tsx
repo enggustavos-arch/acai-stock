@@ -3,13 +3,13 @@ import './globals.css';
 import RegisterSW from '@/components/RegisterSW';
 
 export const metadata: Metadata = {
-  title: 'Acai Algarve - Ricardo',
+  title: 'Contagem Açaí',
   description: 'Contagem diária de stock',
   manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'Acai Algarve',
+    title: 'Contagem',
   },
   icons: {
     apple: '/icons/icon-180.png',
@@ -21,6 +21,7 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
+  viewportFit: 'cover', // enables safe-area insets on iOS (home bar / notch)
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

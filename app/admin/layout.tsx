@@ -16,13 +16,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     .select('role')
     .eq('user_id', user.id)
     .single();
-  const role = profile?.role;
-  if (role !== 'admin' && role !== 'manager') redirect('/contagem');
+  if (profile?.role !== 'admin') redirect('/contagem');
 
   return (
     <div className="min-h-dvh pb-20">
       {children}
-      <AdminNav role={role} />
+      <AdminNav />
     </div>
   );
 }

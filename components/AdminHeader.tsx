@@ -8,7 +8,7 @@ export default function AdminHeader({ title, subtitle }: { title: string; subtit
     window.location.href = '/login';
   }
   return (
-    <header className="sticky top-0 z-20 bg-acai-600 text-white px-4 py-3 shadow">
+    <header className="sticky top-0 z-20 bg-acai-600 text-white px-4 pb-3 pt-[max(env(safe-area-inset-top),0.75rem)] shadow">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-bold text-lg leading-tight">{title}</h1>
