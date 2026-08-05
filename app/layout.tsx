@@ -3,13 +3,13 @@ import './globals.css';
 import RegisterSW from '@/components/RegisterSW';
 
 export const metadata: Metadata = {
-  title: 'Contagem Açaí',
+  title: 'Acai Algarve - Ricardo',
   description: 'Contagem diária de stock',
   manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'Contagem',
+    title: 'Acai Algarve',
   },
   icons: {
     apple: '/icons/icon-180.png',
