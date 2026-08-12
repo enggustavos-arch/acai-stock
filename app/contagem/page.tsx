@@ -312,4 +312,169 @@ export default function CountPage() {
     }))
     .filter((g) => g.items.length > 0);
 
-  const filled =
+  const filled = data.products.filter((p) => parseQty(qty[p.id] ?? '') !== null).length;
+  const restockCount = data.products.filter(
+    (p) => (parseQty(restockQty[p.id] ?? '') ?? 0) > 0
+  ).length;
+
+  return (
+    <main className="pb-40">
+      {/* header */}
+      <header className="sticky top-0 z-20 bg-acai-600 text-white px-4 pb-3 pt-[max(env(safe-area-inset-top),0.75rem)] shadow">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="font-bold text-lg leading-tight">Contagem de hoje</h1>
+            <p className="text-acai-100 text-sm">
+              {data.locationName} · {displayDate(today)}
+            </p>
+          </div>
+          <button onClick={logout} className="text-acai-100 text-sm underline">
+            Sair
+          </button>
+        </div>
+      </header>
+
+      {!online && (
+        <div className="bg-amber-100 text-amber-900 text-sm px-4 py-2">
+          Sem ligação à internet. Pode continuar a contar — os valores ficam guardados neste
+          telemóvel. Submeta quando a ligação voltar.
+        </div>
+      )}
+
+      {submittedAt && (
+        <div className="bg-green-100 text-green-900 text-sm px-4 py-2">
+          Contagem de hoje submetida ✓ — pode corrigir e voltar a submeter até ao fim do dia.
+        </div>
+      )}
+
+      {data.prefillMissing && (
+        <div className="bg-amber-100 text-amber-900 text-sm px-4 py-2">
+          Não há contagem de ontem — preencha os valores do zero. (O escritório será avisado.)
+        </div>
+      )}
+
+      <div className="px-4 pt-2 pb-0">
+        <p className="text-xs text-gray-400">
+          Chegou mercadoria? Use «recebi mercadoria hoje» debaixo do produto.
+        </p>
+      </div>
+
+      <div className="p-3 space-y-3">
+        {/* count list */}
+        {byCategory.map(({ cat, items }) => {
+          const isCollapsed = collapsed[cat.id];
+          const catFilled = items.filter((p) => parseQty(qty[p.id] ?? '') !== null).length;
+          const catRs = items.filter((p) => (parseQty(restockQty[p.id] ?? '') ?? 0) > 0).length;
+          return (
+            <section key={cat.id} className="card overflow-hidden">
+              <button
+                className="w-full flex items-center justify-between px-4 py-3.5 bg-acai-50 active:bg-acai-100"
+                onClick={() => setCollapsed((c) => ({ ...c, [cat.id]: !c[cat.id] }))}
+              >
+                <span className="font-semibold text-acai-900">
+                  {cat.name}
+                  {catRs > 0 && <span className="ml-1.5 text-xs">📦{catRs}</span>}
+                </span>
+                <span className="text-sm text-gray-500">
+                  {catFilled}/{items.length} {isCollapsed ? '▸' : '▾'}
+                </span>
+              </button>
+              {!isCollapsed && (
+                <ul className="divide-y divide-gray-100">
+                  {items.map((p) => {
+                    const rsOpen = showRs[p.id] || (restockQty[p.id] ?? '') !== '';
+                    return (
+                      <li key={p.id} className="px-3 py-3">
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <span className="font-medium text-[15px]">{p.name}</span>
+                          <span className="text-xs text-gray-400 shrink-0">{p.unit}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button className="btn-step" onClick={() => step(p.id, -1)} aria-label="menos 1">
+                            −1
+                          </button>
+                          <button className="btn-step text-sm" onClick={() => step(p.id, -0.5)}>
+                            −½
+                          </button>
+                          <input
+                            className="input text-center font-semibold flex-1 min-w-0 py-2.5"
+                            inputMode="decimal"
+                            value={qty[p.id] ?? ''}
+                            placeholder="—"
+                            onChange={(e) => setProductQty(p.id, e.target.value)}
+                          />
+                          <button className="btn-step text-sm" onClick={() => step(p.id, 0.5)}>
+                            +½
+                          </button>
+                          <button className="btn-step" onClick={() => step(p.id, 1)} aria-label="mais 1">
+                            +1
+                          </button>
+                        </div>
+                        {rsOpen ? (
+                          <div className="mt-2 flex items-center gap-2 bg-acai-50 rounded-xl px-2.5 py-1.5">
+                            <span className="text-xs font-medium text-acai-700 shrink-0">
+                              📦 Recebido hoje
+                            </span>
+                            <input
+                              className="input text-center py-1.5 flex-1 min-w-0"
+                              inputMode="decimal"
+                              placeholder="0"
+                              value={restockQty[p.id] ?? ''}
+                              onChange={(e) => setProductRestock(p.id, e.target.value)}
+                            />
+                            <button
+                              className="text-gray-400 text-lg px-1 shrink-0"
+                              aria-label="remover reposição"
+                              onClick={() => {
+                                setProductRestock(p.id, '');
+                                setShowRs((s) => ({ ...s, [p.id]: false }));
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            className="mt-1.5 text-xs text-acai-600 underline"
+                            onClick={() => setShowRs((s) => ({ ...s, [p.id]: true }))}
+                          >
+                            + recebi mercadoria hoje
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+          );
+        })}
+      </div>
+
+      {/* sticky submit bar */}
+      <div className="fixed bottom-0 inset-x-0 z-30 bg-white border-t border-gray-200 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] space-y-2">
+        {submitError && <p className="text-sm text-red-600">{submitError}</p>}
+        <div className="flex gap-2">
+          <input
+            className="input flex-1"
+            placeholder="Contado por (nome)"
+            value={countedBy}
+            onChange={(e) => onCountedBy(e.target.value)}
+          />
+          <button
+            className="btn-primary shrink-0"
+            onClick={submit}
+            disabled={saving || !online}
+          >
+            {saving ? 'A enviar…' : submittedAt ? 'Atualizar' : 'Submeter'}
+          </button>
+        </div>
+        <p className="text-xs text-gray-400 text-center">
+          {filled}/{data.products.length} produtos preenchidos
+          {restockCount > 0 ? ` · 📦 ${restockCount} reposição(ões)` : ''}
+          {!online ? ' · sem ligação — guardado no telemóvel' : ''}
+        </p>
+      </div>
+    </main>
+  );
+}
