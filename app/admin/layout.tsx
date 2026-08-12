@@ -16,7 +16,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     .select('role')
     .eq('user_id', user.id)
     .single();
-  if (profile?.role !== 'admin') redirect('/contagem');
+
+  // admin and manager can use the dashboard; products/settings pages
+  // have their own admin-only guards
+  if (profile?.role !== 'admin' && profile?.role !== 'manager') redirect('/contagem');
 
   return (
     <div className="min-h-dvh pb-20">
