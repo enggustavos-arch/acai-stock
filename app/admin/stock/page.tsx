@@ -21,6 +21,8 @@ export default function AdminStock() {
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editQty, setEditQty] = useState<Record<string, string>>({});
+  const [editRs, setEditRs] = useState<Record<string, string>>({});
+  const [rsDirty, setRsDirty] = useState(false);
   const [editBy, setEditBy] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -76,11 +78,16 @@ export default function AdminStock() {
 
   function startEdit() {
     const q: Record<string, string> = {};
+    const r: Record<string, string> = {};
     for (const p of products) {
       const v = lineBy(count, p.id);
       if (v !== undefined) q[p.id] = fmtQty(v);
+      const rs = restockSum(p.id);
+      if (rs > 0) r[p.id] = fmtQty(rs);
     }
     setEditQty(q);
+    setEditRs(r);
+    setRsDirty(false);
     setEditBy(count?.counted_by ?? 'Escritório');
     setEditing(true);
   }
@@ -115,6 +122,28 @@ export default function AdminStock() {
       if (lines.length > 0) {
         const { error: e3 } = await supabase.from('count_lines').insert(lines);
         if (e3) throw e3;
+      }
+      // replace this date's restocks only if the Rep. column was touched
+      if (rsDirty) {
+        const { error: e4 } = await supabase
+          .from('restocks')
+          .delete()
+          .eq('location_id', locId)
+          .eq('date', date);
+        if (e4) throw e4;
+        const rsRows = products
+          .map((p) => ({ pid: p.id, n: parseQty(editRs[p.id] ?? '') }))
+          .filter((x) => x.n !== null && x.n > 0)
+          .map((x) => ({
+            location_id: locId,
+            product_id: x.pid,
+            date,
+            quantity: x.n as number,
+          }));
+        if (rsRows.length > 0) {
+          const { error: e5 } = await supabase.from('restocks').insert(rsRows);
+          if (e5) throw e5;
+        }
       }
       setMsg('Guardado ✓');
       await load();
@@ -233,7 +262,22 @@ export default function AdminStock() {
                             {y !== undefined ? fmtQty(y) : '—'}
                           </td>
                           <td className="text-right px-1 py-2 text-gray-500">
-                            {rs > 0 ? '+' + fmtQty(rs) : '—'}
+                            {editing ? (
+                              <input
+                                className="input py-1 px-1 w-14 text-right text-sm"
+                                inputMode="decimal"
+                                placeholder="0"
+                                value={editRs[p.id] ?? ''}
+                                onChange={(e) => {
+                                  setRsDirty(true);
+                                  setEditRs((q) => ({ ...q, [p.id]: e.target.value }));
+                                }}
+                              />
+                            ) : rs > 0 ? (
+                              '+' + fmtQty(rs)
+                            ) : (
+                              '—'
+                            )}
                           </td>
                           <td className="text-right px-1 py-2">
                             {editing ? (

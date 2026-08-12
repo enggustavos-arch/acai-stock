@@ -16,7 +16,7 @@ interface LoadedData {
   todaySubmittedAt: string | null;
   prefillMissing: boolean;
   initialQty: QtyMap;
-  restocks: Restock[];
+  initialRestock: QtyMap;
 }
 
 export default function CountPage() {
@@ -26,17 +26,15 @@ export default function CountPage() {
   const [data, setData] = useState<LoadedData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [qty, setQty] = useState<QtyMap>({});
+  const [restockQty, setRestockQty] = useState<QtyMap>({});
+  const [showRs, setShowRs] = useState<Record<string, boolean>>({});
+  const rsDirty = useRef(false);
   const [countedBy, setCountedBy] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [online, setOnline] = useState(true);
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submittedAt, setSubmittedAt] = useState<string | null>(null);
-  const [restocks, setRestocks] = useState<Restock[]>([]);
-  const [rsProduct, setRsProduct] = useState('');
-  const [rsQty, setRsQty] = useState('');
-  const [rsNote, setRsNote] = useState('');
-  const [rsBusy, setRsBusy] = useState(false);
   const draftKey = useRef<string>('');
 
   // --- online/offline banner ---
@@ -98,6 +96,16 @@ export default function CountPage() {
         }
       }
 
+      // today's restocks, summed per product
+      const rsSums: Record<string, number> = {};
+      for (const r of (rsRes.data ?? []) as Restock[]) {
+        rsSums[r.product_id] = (rsSums[r.product_id] ?? 0) + Number(r.quantity);
+      }
+      const initialRestock: QtyMap = {};
+      for (const [pid, n] of Object.entries(rsSums)) {
+        if (n > 0) initialRestock[pid] = fmtQty(n);
+      }
+
       setData({
         locationId,
         locationName,
@@ -107,9 +115,8 @@ export default function CountPage() {
         todaySubmittedAt: todayCount?.submitted_at ?? null,
         prefillMissing: !todayCount && !yCount,
         initialQty,
-        restocks: (rsRes.data ?? []) as Restock[],
+        initialRestock,
       });
-      setRestocks((rsRes.data ?? []) as Restock[]);
       setSubmittedAt(todayCount?.submitted_at ?? null);
 
       // Draft (kept on the phone) beats server pre-fill for today's typing
@@ -121,6 +128,8 @@ export default function CountPage() {
           const draft = JSON.parse(raw);
           if (draft && typeof draft === 'object') {
             setQty({ ...initialQty, ...(draft.qty ?? {}) });
+            setRestockQty({ ...initialRestock, ...(draft.rs ?? {}) });
+            if (draft.rs && Object.keys(draft.rs).length > 0) rsDirty.current = true;
             setCountedBy(draft.countedBy ?? todayCount?.counted_by ?? '');
             applied = true;
           }
@@ -128,6 +137,7 @@ export default function CountPage() {
       } catch {}
       if (!applied) {
         setQty(initialQty);
+        setRestockQty(initialRestock);
         setCountedBy(todayCount?.counted_by ?? '');
       }
     } catch (e: any) {
@@ -144,23 +154,29 @@ export default function CountPage() {
   }, [load]);
 
   // --- draft autosave: every change hits localStorage immediately ---
-  const saveDraft = useCallback(
-    (nextQty: QtyMap, nextCountedBy: string) => {
-      if (!draftKey.current) return;
-      try {
-        localStorage.setItem(
-          draftKey.current,
-          JSON.stringify({ qty: nextQty, countedBy: nextCountedBy, ts: Date.now() })
-        );
-      } catch {}
-    },
-    []
-  );
+  const saveDraft = useCallback((nextQty: QtyMap, nextRs: QtyMap, nextCountedBy: string) => {
+    if (!draftKey.current) return;
+    try {
+      localStorage.setItem(
+        draftKey.current,
+        JSON.stringify({ qty: nextQty, rs: nextRs, countedBy: nextCountedBy, ts: Date.now() })
+      );
+    } catch {}
+  }, []);
 
   function setProductQty(productId: string, value: string) {
     setQty((prev) => {
       const next = { ...prev, [productId]: value };
-      saveDraft(next, countedBy);
+      saveDraft(next, restockQty, countedBy);
+      return next;
+    });
+  }
+
+  function setProductRestock(productId: string, value: string) {
+    rsDirty.current = true;
+    setRestockQty((prev) => {
+      const next = { ...prev, [productId]: value };
+      saveDraft(qty, next, countedBy);
       return next;
     });
   }
@@ -173,10 +189,10 @@ export default function CountPage() {
 
   function onCountedBy(v: string) {
     setCountedBy(v);
-    saveDraft(qty, v);
+    saveDraft(qty, restockQty, v);
   }
 
-  // --- submit ---
+  // --- submit: count via RPC, then sync today's restocks (if touched) ---
   async function submit() {
     if (!data) return;
     setSubmitError(null);
@@ -206,47 +222,51 @@ export default function CountPage() {
       p_lines: lines,
       p_prefill_missing: data.prefillMissing,
     });
-    setSaving(false);
     if (error) {
+      setSaving(false);
       setSubmitError('Falha ao submeter. Verifique a ligação e tente novamente. (Os valores estão guardados neste telemóvel.)');
       return;
     }
+
+    // restocks: replace today's rows with what's on screen (only if user touched them)
+    if (rsDirty.current) {
+      const del = await supabase
+        .from('restocks')
+        .delete()
+        .eq('location_id', data.locationId)
+        .eq('date', today);
+      let rsError = del.error;
+      if (!rsError) {
+        const rows = data.products
+          .map((p) => ({ pid: p.id, n: parseQty(restockQty[p.id] ?? '') }))
+          .filter((x) => x.n !== null && x.n > 0)
+          .map((x) => ({
+            location_id: data.locationId,
+            product_id: x.pid,
+            date: today,
+            quantity: x.n as number,
+          }));
+        if (rows.length > 0) {
+          const ins = await supabase.from('restocks').insert(rows);
+          rsError = ins.error;
+        }
+      }
+      if (rsError) {
+        setSaving(false);
+        setSubmitError(
+          'Contagem submetida ✓, mas falhou o registo das reposições. Tente Submeter outra vez.'
+        );
+        return;
+      }
+      rsDirty.current = false;
+    }
+
+    setSaving(false);
     try {
       localStorage.removeItem(draftKey.current);
     } catch {}
     setSubmittedAt(new Date().toISOString());
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  // --- restocks ---
-  async function addRestock() {
-    if (!data) return;
-    const n = parseQty(rsQty);
-    if (!rsProduct || n === null || n <= 0) return;
-    setRsBusy(true);
-    const { data: inserted, error } = await supabase
-      .from('restocks')
-      .insert({
-        location_id: data.locationId,
-        product_id: rsProduct,
-        date: today,
-        quantity: n,
-        note: rsNote.trim() || null,
-      })
-      .select()
-      .single();
-    setRsBusy(false);
-    if (!error && inserted) {
-      setRestocks((r) => [...r, inserted as Restock]);
-      setRsProduct('');
-      setRsQty('');
-      setRsNote('');
-    }
-  }
-
-  async function deleteRestock(id: string) {
-    const { error } = await supabase.from('restocks').delete().eq('id', id);
-    if (!error) setRestocks((r) => r.filter((x) => x.id !== id));
   }
 
   async function logout() {
@@ -285,7 +305,9 @@ export default function CountPage() {
     .filter((g) => g.items.length > 0);
 
   const filled = data.products.filter((p) => parseQty(qty[p.id] ?? '') !== null).length;
-  const productName = (id: string) => data.products.find((p) => p.id === id)?.name ?? '?';
+  const restockCount = data.products.filter(
+    (p) => (parseQty(restockQty[p.id] ?? '') ?? 0) > 0
+  ).length;
 
   return (
     <main className="pb-40">
@@ -323,128 +345,102 @@ export default function CountPage() {
         </div>
       )}
 
+      <div className="px-4 pt-2 pb-0">
+        <p className="text-xs text-gray-400">
+          Chegou mercadoria? Use «recebi mercadoria hoje» debaixo do produto.
+        </p>
+      </div>
+
       <div className="p-3 space-y-3">
         {/* count list */}
         {byCategory.map(({ cat, items }) => {
           const isCollapsed = collapsed[cat.id];
           const catFilled = items.filter((p) => parseQty(qty[p.id] ?? '') !== null).length;
+          const catRs = items.filter((p) => (parseQty(restockQty[p.id] ?? '') ?? 0) > 0).length;
           return (
             <section key={cat.id} className="card overflow-hidden">
               <button
                 className="w-full flex items-center justify-between px-4 py-3.5 bg-acai-50 active:bg-acai-100"
                 onClick={() => setCollapsed((c) => ({ ...c, [cat.id]: !c[cat.id] }))}
               >
-                <span className="font-semibold text-acai-900">{cat.name}</span>
+                <span className="font-semibold text-acai-900">
+                  {cat.name}
+                  {catRs > 0 && <span className="ml-1.5 text-xs">📦{catRs}</span>}
+                </span>
                 <span className="text-sm text-gray-500">
                   {catFilled}/{items.length} {isCollapsed ? '▸' : '▾'}
                 </span>
               </button>
               {!isCollapsed && (
                 <ul className="divide-y divide-gray-100">
-                  {items.map((p) => (
-                    <li key={p.id} className="px-3 py-3">
-                      <div className="flex items-center justify-between gap-2 mb-2">
-                        <span className="font-medium text-[15px]">{p.name}</span>
-                        <span className="text-xs text-gray-400 shrink-0">{p.unit}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <button className="btn-step" onClick={() => step(p.id, -1)} aria-label="menos 1">
-                          −1
-                        </button>
-                        {p.allows_half && (
+                  {items.map((p) => {
+                    const rsOpen = showRs[p.id] || (restockQty[p.id] ?? '') !== '';
+                    return (
+                      <li key={p.id} className="px-3 py-3">
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <span className="font-medium text-[15px]">{p.name}</span>
+                          <span className="text-xs text-gray-400 shrink-0">{p.unit}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button className="btn-step" onClick={() => step(p.id, -1)} aria-label="menos 1">
+                            −1
+                          </button>
                           <button className="btn-step text-sm" onClick={() => step(p.id, -0.5)}>
                             −½
                           </button>
-                        )}
-                        <input
-                          className="input text-center font-semibold flex-1 min-w-0 py-2.5"
-                          inputMode="decimal"
-                          value={qty[p.id] ?? ''}
-                          placeholder="—"
-                          onChange={(e) => setProductQty(p.id, e.target.value)}
-                        />
-                        {p.allows_half && (
+                          <input
+                            className="input text-center font-semibold flex-1 min-w-0 py-2.5"
+                            inputMode="decimal"
+                            value={qty[p.id] ?? ''}
+                            placeholder="—"
+                            onChange={(e) => setProductQty(p.id, e.target.value)}
+                          />
                           <button className="btn-step text-sm" onClick={() => step(p.id, 0.5)}>
                             +½
                           </button>
+                          <button className="btn-step" onClick={() => step(p.id, 1)} aria-label="mais 1">
+                            +1
+                          </button>
+                        </div>
+                        {rsOpen ? (
+                          <div className="mt-2 flex items-center gap-2 bg-acai-50 rounded-xl px-2.5 py-1.5">
+                            <span className="text-xs font-medium text-acai-700 shrink-0">
+                              📦 Recebido hoje
+                            </span>
+                            <input
+                              className="input text-center py-1.5 flex-1 min-w-0"
+                              inputMode="decimal"
+                              placeholder="0"
+                              value={restockQty[p.id] ?? ''}
+                              onChange={(e) => setProductRestock(p.id, e.target.value)}
+                            />
+                            <button
+                              className="text-gray-400 text-lg px-1 shrink-0"
+                              aria-label="remover reposição"
+                              onClick={() => {
+                                setProductRestock(p.id, '');
+                                setShowRs((s) => ({ ...s, [p.id]: false }));
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            className="mt-1.5 text-xs text-acai-600 underline"
+                            onClick={() => setShowRs((s) => ({ ...s, [p.id]: true }))}
+                          >
+                            + recebi mercadoria hoje
+                          </button>
                         )}
-                        <button className="btn-step" onClick={() => step(p.id, 1)} aria-label="mais 1">
-                          +1
-                        </button>
-                      </div>
-                    </li>
-                  ))}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </section>
           );
         })}
-
-        {/* restocks */}
-        <section className="card p-4">
-          <h2 className="font-semibold text-acai-900 mb-1">Reposições recebidas hoje</h2>
-          <p className="text-sm text-gray-500 mb-3">
-            Chegou mercadoria hoje? Registe aqui (além de a contar em cima).
-          </p>
-          <div className="space-y-2">
-            <select
-              className="input"
-              value={rsProduct}
-              onChange={(e) => setRsProduct(e.target.value)}
-            >
-              <option value="">Produto…</option>
-              {byCategory.map(({ cat, items }) => (
-                <optgroup key={cat.id} label={cat.name}>
-                  {items.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-            <div className="flex gap-2">
-              <input
-                className="input flex-1"
-                inputMode="decimal"
-                placeholder="Quantidade"
-                value={rsQty}
-                onChange={(e) => setRsQty(e.target.value)}
-              />
-              <input
-                className="input flex-1"
-                placeholder="Nota (opcional)"
-                value={rsNote}
-                onChange={(e) => setRsNote(e.target.value)}
-              />
-            </div>
-            <button
-              className="btn-secondary w-full"
-              onClick={addRestock}
-              disabled={rsBusy || !online || !rsProduct || parseQty(rsQty) === null}
-            >
-              {rsBusy ? 'A registar…' : '+ Registar reposição'}
-            </button>
-          </div>
-          {restocks.length > 0 && (
-            <ul className="mt-3 divide-y divide-gray-100 text-sm">
-              {restocks.map((r) => (
-                <li key={r.id} className="py-2 flex items-center justify-between gap-2">
-                  <span>
-                    <strong>{fmtQty(r.quantity)}</strong> × {productName(r.product_id)}
-                    {r.note ? <span className="text-gray-400"> — {r.note}</span> : null}
-                  </span>
-                  <button
-                    className="text-red-500 text-xs underline shrink-0"
-                    onClick={() => deleteRestock(r.id)}
-                  >
-                    apagar
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
       </div>
 
       {/* sticky submit bar */}
@@ -467,6 +463,7 @@ export default function CountPage() {
         </div>
         <p className="text-xs text-gray-400 text-center">
           {filled}/{data.products.length} produtos preenchidos
+          {restockCount > 0 ? ` · 📦 ${restockCount} reposição(ões)` : ''}
           {!online ? ' · sem ligação — guardado no telemóvel' : ''}
         </p>
       </div>

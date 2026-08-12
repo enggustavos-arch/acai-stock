@@ -20,7 +20,7 @@
 1. Abra a app **Contagem** → aparece logo a **Contagem de hoje**
 2. Os valores **já vêm preenchidos com a contagem de ontem** — só muda o que mexeu
 3. Use os botões **−1 / +1** (e **−½ / +½**) ou escreva o número diretamente
-4. **Chegou mercadoria hoje?** Registe em **Reposições recebidas hoje** (produto + quantidade) — além de a contar em cima
+4. **Chegou mercadoria hoje?** No produto, toque em **«+ recebi mercadoria hoje»** e escreva a quantidade recebida — além de a contar no número de cima
 5. Escreva o seu nome em **Contado por**
 6. Toque em **Submeter** ✓
 
