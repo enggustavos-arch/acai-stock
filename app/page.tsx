@@ -16,6 +16,6 @@ export default async function Home() {
     .eq('user_id', user.id)
     .single();
 
-  if (profile?.role === 'admin' || profile?.role === 'manager') redirect('/admin');;
+  if (['admin', 'owner', 'store_manager'].includes(profile?.role ?? '')) redirect('/admin');
   redirect('/contagem');
 }

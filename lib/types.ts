@@ -53,6 +53,14 @@ export interface Restock {
 
 export interface Profile {
   user_id: string;
-  role: 'admin' | 'staff';
+  role: 'admin' | 'owner' | 'store_manager' | 'staff';
   location_id: string | null;
+}
+
+export interface SaleDaily {
+  id: string;
+  location_id: string;
+  date: string;
+  amount: number;
+  note: string | null;
 }

@@ -14,6 +14,7 @@ export default async function ProductsLayout({ children }: { children: React.Rea
     .select('role')
     .eq('user_id', user.id)
     .single();
-  if (profile?.role !== 'admin') redirect('/admin');
+  // admin, owner and store_manager can add/remove products & categories
+  if (!['admin', 'owner', 'store_manager'].includes(profile?.role ?? '')) redirect('/admin');
   return <>{children}</>;
 }

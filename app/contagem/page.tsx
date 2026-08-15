@@ -17,6 +17,9 @@ interface LoadedData {
   prefillMissing: boolean;
   initialQty: QtyMap;
   initialRestock: QtyMap;
+  yesterday: string;
+  yesterdayCountedBy: string | null;
+  yesterdayQty: QtyMap;
 }
 
 export default function CountPage() {
@@ -36,6 +39,13 @@ export default function CountPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submittedAt, setSubmittedAt] = useState<string | null>(null);
   const draftKey = useRef<string>('');
+
+  // --- editing yesterday's count (staff can edit today + yesterday) ---
+  const [showYesterday, setShowYesterday] = useState(false);
+  const [yQty, setYQty] = useState<QtyMap>({});
+  const [yBy, setYBy] = useState('');
+  const [ySaving, setYSaving] = useState(false);
+  const [yMsg, setYMsg] = useState<string | null>(null);
 
   // --- online/offline banner ---
   useEffect(() => {
@@ -64,8 +74,8 @@ export default function CountPage() {
         .single();
       if (pErr) throw new Error('Não foi possível carregar o perfil.');
       if (!profile?.location_id) {
-        // admin/manager have no store — send them to the dashboard instead of erroring
-        if (profile?.role === 'admin' || profile?.role === 'manager') {
+        // admin/owner/store_manager have no store — send them to the dashboard instead of erroring
+        if (['admin', 'owner', 'store_manager'].includes(profile?.role ?? '')) {
           window.location.replace('/admin');
           return;
         }
@@ -114,6 +124,13 @@ export default function CountPage() {
         if (n > 0) initialRestock[pid] = fmtQty(n);
       }
 
+      const yesterdayQty: QtyMap = {};
+      if (yCount) {
+        for (const l of yCount.count_lines ?? []) {
+          if (activeIds.has(l.product_id)) yesterdayQty[l.product_id] = fmtQty(l.quantity);
+        }
+      }
+
       setData({
         locationId,
         locationName,
@@ -124,8 +141,13 @@ export default function CountPage() {
         prefillMissing: !todayCount && !yCount,
         initialQty,
         initialRestock,
+        yesterday,
+        yesterdayCountedBy: yCount?.counted_by ?? null,
+        yesterdayQty,
       });
       setSubmittedAt(todayCount?.submitted_at ?? null);
+      setYQty(yesterdayQty);
+      setYBy(yCount?.counted_by ?? '');
 
       // Draft (kept on the phone) beats server pre-fill for today's typing
       draftKey.current = `acai-draft-${locationId}-${today}`;
@@ -277,6 +299,45 @@ export default function CountPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+  // --- correct yesterday's already-submitted count (allowed up to ~24h later) ---
+  async function saveYesterday() {
+    if (!data) return;
+    setYMsg(null);
+    setYSaving(true);
+    try {
+      const { data: dc, error: e1 } = await supabase
+        .from('daily_counts')
+        .upsert(
+          {
+            location_id: data.locationId,
+            date: data.yesterday,
+            counted_by: yBy.trim() || data.yesterdayCountedBy || countedBy.trim() || 'Loja',
+            submitted_at: new Date().toISOString(),
+          },
+          { onConflict: 'location_id,date' }
+        )
+        .select()
+        .single();
+      if (e1 || !dc) throw e1;
+      const { error: e2 } = await supabase.from('count_lines').delete().eq('daily_count_id', dc.id);
+      if (e2) throw e2;
+      const lines = data.products
+        .map((p) => ({ product_id: p.id, q: parseQty(yQty[p.id] ?? '') }))
+        .filter((x) => x.q !== null)
+        .map((x) => ({ daily_count_id: dc.id, product_id: x.product_id, quantity: x.q as number }));
+      if (lines.length > 0) {
+        const { error: e3 } = await supabase.from('count_lines').insert(lines);
+        if (e3) throw e3;
+      }
+      setYMsg('Guardado ✓');
+      load();
+    } catch {
+      setYMsg('Erro ao guardar. Se já passaram mais de 24h, já não é possível corrigir — peça ao escritório.');
+    } finally {
+      setYSaving(false);
+    }
+  }
+
   async function logout() {
     await supabase.auth.signOut();
     window.location.href = '/login';
@@ -333,6 +394,50 @@ export default function CountPage() {
           </button>
         </div>
       </header>
+
+      {data.yesterdayCountedBy && (
+        <div className="px-4 pt-2">
+          <button
+            className="text-xs text-acai-600 underline"
+            onClick={() => setShowYesterday((s) => !s)}
+          >
+            {showYesterday ? 'Fechar' : `✎ Corrigir contagem de ontem (${displayDate(data.yesterday)})`}
+          </button>
+        </div>
+      )}
+
+      {showYesterday && (
+        <div className="mx-3 mt-2 card p-3 space-y-2 border-2 border-acai-200">
+          <p className="text-xs text-gray-500">
+            Só é possível corrigir até cerca de 24h depois de submeter. Para datas mais antigas,
+            peça ao escritório.
+          </p>
+          <input
+            className="input"
+            placeholder="Contado por (nome)"
+            value={yBy}
+            onChange={(e) => setYBy(e.target.value)}
+          />
+          <div className="max-h-72 overflow-y-auto space-y-1 divide-y divide-gray-100">
+            {data.products.map((p) => (
+              <div key={p.id} className="flex items-center justify-between gap-2 py-1.5">
+                <span className="text-sm flex-1">{p.name} <span className="text-gray-400 text-xs">{p.unit}</span></span>
+                <input
+                  className="input text-center py-1 px-1 w-20 text-sm"
+                  inputMode="decimal"
+                  value={yQty[p.id] ?? ''}
+                  placeholder="—"
+                  onChange={(e) => setYQty((q) => ({ ...q, [p.id]: e.target.value }))}
+                />
+              </div>
+            ))}
+          </div>
+          {yMsg && <p className="text-sm">{yMsg}</p>}
+          <button className="btn-primary w-full" onClick={saveYesterday} disabled={ySaving}>
+            {ySaving ? 'A guardar…' : 'Guardar correção de ontem'}
+          </button>
+        </div>
+      )}
 
       {!online && (
         <div className="bg-amber-100 text-amber-900 text-sm px-4 py-2">
